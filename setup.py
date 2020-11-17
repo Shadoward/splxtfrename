@@ -10,11 +10,10 @@ with open('LICENSE') as f:
     license = f.read()
 
 install_requires = [
-    'argparse',
-    'numpy',
     'pandas',
-    'glob',
+    'glob3',
     'tqdm',
+    'gooey',
 ]
 
 extras_require = {
@@ -25,12 +24,12 @@ extras_require = {
 }
 
 setup(
-    name='nelxtfrename',
-    version='0.1.0',
-    description='Rename *.XTF using *.NEL group LineRunline',
+    name='splxtfrename',
+    version='0.2.0',
+    description='Rename *.XTF using *.FBF/FBZ file',
     long_description=readme,
     author='Patrice Ponchant',
-    author_email='patrice.ponchant@furgo.com',
+    author_email='patrice.ponchant@fugro.com',
     include_package_data = True,
     install_requires=install_requires,
     extras_require=extras_require,
@@ -39,7 +38,7 @@ setup(
     license=license,
     packages=find_namespace_packages(where='src'),
     package_dir={'': 'src'},
-    keywords='NEL XTF SideScanSonar Rename',
+    keywords='FBF FBZ XTF SideScanSonar Rename',
     classifiers=[
         'Development Status :: 1 - Beta',
         'Natural Language :: English',

@@ -26,52 +26,149 @@ import os
 import subprocess
 
 import pandas as pd
-
-from argparse import ArgumentParser
-from argparse import RawTextHelpFormatter
+import math
 
 # progress bar
-from tqdm import *
+import time
+from contextlib import redirect_stderr
+import io
+from tqdm import tqdm
+
+# GUI
+from gooey import Gooey, GooeyParser
 
 # 417574686f723a205061747269636520506f6e6368616e74
 ####### Code #######
+# this needs to be *before* the @Gooey decorator!
+# (this code allows to only use Gooey when no arguments are passed to the script)
+if len(sys.argv) >= 2:
+    if not '--ignore-gooey' in sys.argv:
+        sys.argv.append('--ignore-gooey')
+        cmd = True 
+    else:
+        cmd = False  
+
+
+# GUI Configuration
+@Gooey(
+    program_name='Rename *.XTF using *.FBF/FBZ file',
+    progress_regex=r"^progress: (?P<current>\d+)/(?P<total>\d+)$",
+    progress_expr="current / total * 100",
+    hide_progress_msg=True,
+    timing_options={        
+        'show_time_remaining':True,
+        'hide_time_remaining_on_complete':True
+        },
+    tabbed_groups=True,
+    navigation='Tabbed',
+    header_bg_color = '#95ACC8',
+    #body_bg_color = '#95ACC8',
+    menu=[{
+        'name': 'File',
+        'items': [{
+                'type': 'AboutDialog',
+                'menuTitle': 'About',
+                'name': 'SPL XTF Rename',
+                'description': 'Rename *.XTF using *.FBF/FBZ file',
+                'version': '0.2.0',
+                'copyright': '2020',
+                'website': 'https://github.com/Shadoward/splxtfrename',
+                'developer': 'patrice.ponchant@fugro.com',
+                'license': 'MIT'
+                }]
+        },{
+        'name': 'Help',
+        'items': [{
+            'type': 'Link',
+            'menuTitle': 'Documentation',
+            'url': ''
+            }]
+        }]
+    )
+
 def main():
-    parser = ArgumentParser(description='Rename the *.xtf files using the *-position.fbf or .fbz files',
-        epilog='Example: \n To rename the *.xtf file use python splxtfremane.py -r -fbz c:/temp/xtf/ c:/temp/fbf/ FugroBrasilis-CRP-Position \n',
-        formatter_class=RawTextHelpFormatter)    
-    parser.add_argument('-r', action='store_true', default=False, dest='recursive', help='Search recursively for XTF files.')
-    parser.add_argument('-fbz', action='store_true', default=False, dest='fbfFormat', help='If FBZ, use this argument.')
-    parser.add_argument('xtfFolder', action='store', help='xtfFolder (str): XTF folder path. This is the path where the *.XTF files to process are.')
-    parser.add_argument('splFolder', action='store', help='splFolder (str): SPL folder path. This is the path where the *.fbf/*.fbz files to process are.')
-    parser.add_argument('SPLposition', action='store', help='SPLposition (str): SPL postion file to be use to rename the *.xtf.')
-    
-    if len(sys.argv)==1:
-        parser.print_help()
-        sys.exit(1)
-
+    desc = "Rename the *.xtf files using the *-position.fbf or .fbz files"    
+    parser = GooeyParser(description=desc)
+    required = parser.add_argument_group('Required')
+    optional = parser.add_argument_group('Optional')    
+    # Optional Arguments
+    optional.add_argument(
+        '-r', '--recursive',
+        metavar='Recurse into the subfolders?', 
+        action='store_true', 
+        default=True, 
+        dest='recursive', 
+        help='Yes')
+    optional.add_argument(
+        '-f', '--fbz',
+        metavar='SPL Format is FBZ?',
+        action='store_true', 
+        default=False, 
+        dest='fbfFormat', 
+        help='Yes')
+    optional.add_argument(
+        '-n', '-rename',
+        metavar='Rename the XTF?', 
+        action='store_true', 
+        default=False, 
+        dest='rename', 
+        help='Yes')
+    # Required Arguments
+    required.add_argument(
+        #'--xtfFolder', 
+        #action='store',
+        dest='xtfFolder',        
+        metavar='XTF Folder Path',
+        help='XTF Root path. This is the path where the *.xtf files to process are.',
+        default='C:\\Users\\patrice.ponchant\\Downloads\\XTF', 
+        widget='DirChooser',
+        type=str,
+        gooey_options=dict(full_width=True,))
+    required.add_argument(
+        #'--splFolder', 
+        #action='store',
+        dest='splFolder',       
+        metavar='SPL Root Path', 
+        help='This is the path where the *.fbf/*.fbz files to process are. (Root Session Folder)',
+        default='C:\\Users\\patrice.ponchant\\Downloads\\NEL',
+        #default='S:\\JOBS\\2020\\20030002_Shell_FBR_MF\\B2B_FromVessel\\Navigation\\Starfix_Logging\\RawData', 
+        widget='DirChooser',
+        type=str,
+        gooey_options=dict(full_width=True,))
+    required.add_argument(
+        #'--splPosition', 
+        #action='store',
+        dest='splPosition',
+        metavar='SPL Position File Name', 
+        widget='TextField',
+        type=str,
+        default='FugroBrasilis-CRP-Position',
+        help='SPL position file to be use to rename the *.xtf without extention.',
+        gooey_options=dict(full_width=True,))
+        
     args = parser.parse_args()
-    process(args)
+    process(args, cmd)
 
-def process(args):
+def process(args, cmd):
     """
     Uses this if called as __main__.
     """
     xtfFolder = args.xtfFolder
     splFolder = args.splFolder
-    SPLposition = args.SPLposition
-    vessel = SPLposition.split('-')[0]
+    splPosition = args.splPosition
+    vessel = splPosition.split('-')[0]
     
     # Defined Dataframe
     dfSPL = pd.DataFrame(columns = ["Session Start", "Session End", "SPL LineName", "Vessel Name"])
-    dfXTF = pd.DataFrame(columns = ["Session Start", "Session End", "Vessel Name", "SSS Start", "numberOfBytes", "STX", 
-                                    "EMModel", "FilePath", "SSS FileName", "SPL LineName", "SSS New LineName"]) 
-    dftmp = pd.DataFrame(columns = ["Session Start", "Session End", "Vessel Name", "SSS Start", "numberOfBytes", "STX", 
-                                    "EMModel", "FilePath", "SSS FileName", "SPL LineName", "SSS New LineName"])    
+    dfXTF = pd.DataFrame(columns = ["Session Start", "Session End", "Vessel Name", "SSS Start", "FileName in XTF",
+                                    "FilePath", "SSS FileName", "SPL LineName", "SSS New LineName"]) 
+    dftmp = pd.DataFrame(columns = ["Session Start", "Session End", "Vessel Name", "SSS Start", "FileName in XTF",
+                                    "FilePath", "SSS FileName", "SPL LineName", "SSS New LineName"])    
     dfer = pd.DataFrame(columns = ["SPLPath"])
     
     # Check if SPL is a position file   
-    if SPLposition.find('-Position') == -1:
-        print (f"The SPL file {SPLposition} is not a position file, quitting")
+    if splPosition.find('-Position') == -1:
+        print (f"The SPL file {splPosition} is not a position file, quitting")
         exit()
 
     print('')
@@ -88,35 +185,60 @@ def process(args):
                     xtfListFile.append(filepath)
     else:
         xtfListFile = glob.glob(xtfFolder + "\\*.xtf")
-        
+     
+    nowSPL = datetime.datetime.now() # record time of the subprocess   
     if args.fbfFormat:
-        splListFile = glob.glob(splFolder + "\\**\\" + SPLposition + ".fbz", recursive=True)
+        splListFile = glob.glob(splFolder + "\\**\\" + splPosition + ".fbz", recursive=True)
         print('')
         print(f'A total of {splListFile} *.fbf/fbz and {xtfListFile} *.xtf files will be processed.')
         print('')
         print('Reading the FBZ Files')
-        with tqdm(total=len(splListFile)) as pbar:
-            for n in splListFile:              
-                SessionStart, SessionEnd, LineName, er = FBZ2CSV(n , splFolder)
-                dfSPL = dfSPL.append(pd.Series([SessionStart, SessionEnd, LineName, vessel], 
-                                       index=dfSPL.columns ), ignore_index=True)
-                if er:      
-                    dfer = dfer.append(pd.Series([er], index=dfer.columns ), ignore_index=True)
-                pbar.update(1) 
+        if cmd: # to have a nice progress bar in the cmd  
+            pbar = tqdm(total=len(splListFile))
+        else:
+            print(f"Note: Output show file counting every {math.ceil(len(splListFile)/10)}")            
+        for index, n in enumerate(splListFile):              
+            SessionStart, SessionEnd, LineName, er = FBZ2CSV(n , splFolder)
+            dfSPL = dfSPL.append(pd.Series([SessionStart, SessionEnd, LineName, vessel], 
+                                    index=dfSPL.columns ), ignore_index=True)
+            if er:      
+                dfer = dfer.append(pd.Series([er], index=dfer.columns ), ignore_index=True)            
+            if cmd:
+                pbar.update(1)
+            else:
+                print_progress(index, len(splListFile)) # to have a nice progress bar in the GUI
+                if index % math.ceil(len(splListFile)/10) == 0: # decimate print
+                    print(f"Files Process: {index+1}/{len(splListFile)}")                    
+        if cmd:
+            pbar.close()
+        else:
+            print("Subprocess Duration: ", (datetime.datetime.now() - nowSPL))
     else:
-        splListFile = glob.glob(splFolder + "\\**\\" + SPLposition + ".fbf", recursive=True)
+        splListFile = glob.glob(splFolder + "\\**\\" + splPosition + ".fbf", recursive=True)
         print('')
         print(f'A total of {len(splListFile)} *.fbf/fbz and {len(xtfListFile)} *.xtf files will be processed.')
         print('')
         print('Reading the FBF Files')
-        with tqdm(total=len(splListFile)) as pbar:
-            for n in splListFile:
-                SessionStart, SessionEnd, LineName, er = FBF2CSV(n , splFolder)
-                dfSPL = dfSPL.append(pd.Series([SessionStart, SessionEnd, LineName, vessel], 
-                                       index=dfSPL.columns ), ignore_index=True)
-                if er:      
-                    dfer = dfer.append(pd.Series([er], index=dfer.columns ), ignore_index=True)
-                pbar.update(1)          
+        if cmd: # to have a nice progress bar in the cmd  
+            pbar = tqdm(total=len(splListFile))
+        else:
+            print(f"Note: Output show file counting every {math.ceil(len(splListFile)/10)}")             
+        for index, n in enumerate(splListFile):              
+            SessionStart, SessionEnd, LineName, er = FBF2CSV(n , splFolder)
+            dfSPL = dfSPL.append(pd.Series([SessionStart, SessionEnd, LineName, vessel], 
+                                    index=dfSPL.columns ), ignore_index=True)
+            if er:      
+                dfer = dfer.append(pd.Series([er], index=dfer.columns ), ignore_index=True)            
+            if cmd:
+                pbar.update(1)
+            else:
+                print_progress(index, len(splListFile)) # to have a nice progress bar in the GUI                
+                if index % math.ceil(len(splListFile)/10) == 0: # decimate print
+                    print(f"Files Process: {index+1}/{len(splListFile)}")                    
+        if cmd:
+            pbar.close()
+        else:
+            print("Subprocess Duration: ", (datetime.datetime.now() - nowSPL))
 
     # Format datetime
     dfSPL['Session Start'] = pd.to_datetime(dfSPL['Session Start'], format='%d/%m/%Y %H:%M:%S.%f') # format='%d/%m/%Y %H:%M:%S.%f' format='%Y/%m/%d %H:%M:%S.%f' 
@@ -124,55 +246,79 @@ def process(args):
            
     print('')
     print('Reading the XTF File')
-    with tqdm(total=len(xtfListFile)) as pbar:
-        for f in xtfListFile:
-            # Open the XTF file for reading by creating a new XTFReader class and passin in the filename to open.
-            # The reader will read the initial header so we can get to grips with the file contents with ease. 
-            r = XTFReader(f)
-            
-            # print the XTF file header information.  This gives a brief summary of the file contents.
-            #while r.moreData():
-            pingHdr = r.readPacket()
-            if pingHdr != None:
-                XTFStarttime = datetime.datetime(pingHdr.Year, pingHdr.Month, pingHdr.Day, pingHdr.Hour, pingHdr.Minute, pingHdr.Second, pingHdr.HSeconds * 10000)
-                print(XTFStarttime)
-            sys.exit()
-                   
-            numberOfBytes, STX, typeOfDatagram, EMModel, RecordDate, RecordTime = r.readDatagramHeader() # read the common header for any datagram.
-            #AllStartTime = to_timestamp(to_DateTime(RecordDate, RecordTime))           
-            ALLName = os.path.splitext(os.path.basename(f))[0] 
-            dfXTF = dfXTF.append(pd.Series(["","", "", AllStartTime, numberOfBytes, STX, EMModel, f, ALLName, "", ""], 
-                        index=dfXTF.columns ), ignore_index=True)    
-            r.rewind()
-            r.close()               
+    nowXTF = datetime.datetime.now()  # record time of the subprocess 
+    if cmd: # to have a nice progress bar in the cmd  
+        pbar = tqdm(total=len(xtfListFile))
+    else:
+        print(f"Note: Output show file counting every {math.ceil(len(xtfListFile)/10)}")  
+    for index, f in enumerate(xtfListFile):
+        # Open the XTF file for reading by creating a new XTFReader class and passin in the filename to open.
+        # The reader will read the initial header so we can get to grips with the file contents with ease. 
+        r = XTFReader(f)            
+        # print the XTF file header information.  This gives a brief summary of the file contents.
+        pingHdr = r.readPacket()
+        if pingHdr != None:
+            XTFStarttime = datetime.datetime(pingHdr.Year, pingHdr.Month, pingHdr.Day, pingHdr.Hour, pingHdr.Minute, pingHdr.Second, pingHdr.HSeconds * 10000)
+            FileNameinXTF = r.XTFFileHdr.ThisFileName
+        
+        XTFName = os.path.splitext(os.path.basename(f))[0] 
+        dfXTF = dfXTF.append(pd.Series(["", "", "", XTFStarttime, FileNameinXTF, f, XTFName, "", ""], 
+                    index=dfXTF.columns ), ignore_index=True)    
+        r.rewind()
+        r.close()
+        if cmd:
             pbar.update(1)
+        else:
+            print_progress(index, len(xtfListFile)) # to have a nice progress bar in the GU            
+            if index % math.ceil(len(xtfListFile)/10) == 0: # decimate print
+                print(f"Files Process: {index+1}/{len(xtfListFile)}")                 
+    if cmd:
+        pbar.close()
+    else:
+        print("Subprocess Duration: ", (datetime.datetime.now() - nowXTF))
 
     # Format datetime
     dfXTF['SSS Start'] = pd.to_datetime(dfXTF['SSS Start'], unit='s')  # format='%d/%m/%Y %H:%M:%S.%f' format='%Y/%m/%d %H:%M:%S.%f'
         
     print('')
-    print('Renaming the XTF files')
-    with tqdm(total=len(xtfListFile)) as pbar:
-        for index, row in dfSPL.iterrows():                  
-            Start = row['Session Start']
-            End = row['Session End']
-            Name = row['SPL LineName']   
-            dffilter = dfXTF[dfXTF['SSS Start'].between(Start, End)]
-            for index, el in dffilter.iterrows():
-                XTFFile =  el['FilePath']
-                XTFStartTime = el['SSS Start']
-                numberOfBytes = el['numberOfBytes']
-                STX = el['STX']
-                EMModel = el['EMModel']   
-                FolderName = os.path.split(XTFFile)[0]
-                XTFName = os.path.splitext(os.path.basename(XTFFile))[0]                               
-                NewName = FolderName + '\\' + XTFName + '_' + Name + '.xtf'
-                dftmp = dftmp.append(pd.Series([Start, End, vessel, XTFStartTime, numberOfBytes, STX, EMModel, XTFFile, XTFName, Name, NewName], 
-                                    index=dftmp.columns ), ignore_index=True)
-                # rename the *.xtf file           
-                # if os.path.isfile(XTFFile):
-                #     os.rename(XTFFile, NewName)        
-                pbar.update(1)
+    print('Listing and Renaming the XTF files')
+    nowRename = datetime.datetime.now()  # record time of the subprocess 
+    if cmd: # to have a nice progress bar in the cmd
+        if args.rename:  
+            pbar = tqdm(total=len(xtfListFile))
+    else:
+        if args.rename:
+            print(f"Note: Output show file counting every {math.ceil(len(xtfListFile)/10)}")  
+    for index, row in dfSPL.iterrows():                  
+        Start = row['Session Start']
+        End = row['Session End']
+        Name = row['SPL LineName']   
+        dffilter = dfXTF[dfXTF['SSS Start'].between(Start, End)]
+        for index, el in dffilter.iterrows():
+            XTFFile =  el['FilePath']
+            XTFStartTime = el['SSS Start']
+            FileNameinXTF = el['FileName in XTF'] 
+            FolderName = os.path.split(XTFFile)[0]
+            XTFName = os.path.splitext(os.path.basename(XTFFile))[0]                               
+            NewName = FolderName + '\\' + XTFName + '_' + Name + '.xtf'
+            dftmp = dftmp.append(pd.Series([Start, End, vessel, XTFStartTime, FileNameinXTF, XTFFile, XTFName, Name, NewName], 
+                                index=dftmp.columns ), ignore_index=True)
+            # rename the *.xtf file           
+            if args.rename:
+                if cmd:
+                    os.rename(XTFFile, NewName)
+                    pbar.update(1)
+                else:
+                    os.rename(XTFFile, NewName)
+                    print_progress(index, len(xtfListFile)) # to have a nice progress bar in the GU            
+                    if index % math.ceil(len(xtfListFile)/10) == 0: # decimate print
+                        print(f"Files Process: {index+1}/{len(xtfListFile)}")                                
+    if not args.rename:
+        print("No file was rename. Option Rename was unselected")
+    if cmd:
+        pbar.close()
+    else:
+        print("Subprocess Duration: ", (datetime.datetime.now() - nowRename))
                 
     print('')
     print('Creating logs. Please wait....')
@@ -283,7 +429,11 @@ def FBZ2CSV(FBZFileName, Path):
     else:
         er = ""
         return SessionStart, SessionEnd, LineName, er
-
+    
+# from https://www.pakstech.com/blog/python-gooey/
+def print_progress(index, total):
+    print(f"progress: {index+1}/{total}")
+    sys.stdout.flush()
   
 if __name__ == "__main__":
     now = datetime.datetime.now() # time the process
