@@ -338,11 +338,12 @@ def process(args, cmd):
     duplicate.sort_values('SSS Start')
     if not duplicate.empty:
         print("")
-        print(f"A total of {len(duplicate)} *.xtf was/were duplicated.")
+        print(f"A total of {len(duplicate)/2} *.xtf was/were duplicated.")
         print("Please check the Duplicate_SSS_Log.csv for more information.")
         print("The first *.xtf occurrence was renamed.")
         duplicate.to_csv(xtfFolder + "Duplicate_SSS_Log.csv", index=True)
         dftmp = dftmp.drop_duplicates(subset='SSS Start', keep='first')
+        dfXTF = dfXTF.drop_duplicates(subset='SSS Start', keep='first')
    
     # Updated the final dataframe to export the log
     dfXTF.set_index('SSS Start', inplace=True)
