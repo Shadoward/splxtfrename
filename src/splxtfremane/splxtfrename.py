@@ -65,7 +65,7 @@ if len(sys.argv) >= 2:
                 'menuTitle': 'About',
                 'name': 'SPL XTF Rename',
                 'description': 'Rename *.XTF using *.FBF/FBZ file',
-                'version': '0.3.0',
+                'version': '0.4.0',
                 'copyright': '2020',
                 'website': 'https://github.com/Shadoward/splxtfrename',
                 'developer': 'patrice.ponchant@fugro.com',
@@ -140,6 +140,17 @@ def main():
         default='FugroBrasilis-CRP-Position',
         help='SPL position file to be use to rename the *.xtf without extention.',
         gooey_options=dict(full_width=True,))
+    required.add_argument(
+        '-o',
+        '--output',
+        #action='store',
+        dest='outputFolder',
+        metavar='Output Logs Folder', 
+        widget='DirChooser',
+        type=str,
+        default='C:\\Users\\patrice.ponchant\\Downloads\\LOGS',
+        help='Output folder to save all the logs files.',
+        gooey_options=dict(full_width=True,))
         
     args = parser.parse_args()
     process(args, cmd)
@@ -151,6 +162,7 @@ def process(args, cmd):
     xtfFolder = args.xtfFolder
     splFolder = args.splFolder
     splPosition = args.splPosition
+    outputFolder = args.outputFolder
     vessel = splPosition.split('-')[0]
     
     # Defined Dataframe
@@ -185,7 +197,7 @@ def process(args, cmd):
        
     if args.fbfFormat:
         splListFile = glob.glob(splFolder + "\\**\\" + splPosition + ".fbz", recursive=True)
-        SPLFormat = "FBZ"        
+        SPLFormat = "FBZ"             
     else:
         splListFile = glob.glob(splFolder + "\\**\\" + splPosition + ".fbf", recursive=True)
         SPLFormat = "FBF"
@@ -200,7 +212,7 @@ def process(args, cmd):
     else:
         print(f"Note: Output show file counting every {math.ceil(len(splListFile)/10)}")            
     for index, n in enumerate(splListFile): 
-        SessionStart, SessionEnd, LineName, er = SPL2CSV(n, splFolder, SPLFormat)        
+        SessionStart, SessionEnd, LineName, er = SPL2CSV(n, outputFolder, SPLFormat)        
         dfSPL = dfSPL.append(pd.Series([SessionStart, SessionEnd, LineName, vessel], 
                                 index=dfSPL.columns ), ignore_index=True)
         if er:      
@@ -217,8 +229,12 @@ def process(args, cmd):
         print("Subprocess Duration: ", (datetime.datetime.now() - nowSPL))
 
     # Format datetime
-    dfSPL['Session Start'] = pd.to_datetime(dfSPL['Session Start'], format='%d/%m/%Y %H:%M:%S.%f') # format='%d/%m/%Y %H:%M:%S.%f' format='%Y/%m/%d %H:%M:%S.%f' 
-    dfSPL['Session End'] = pd.to_datetime(dfSPL['Session End'], format='%d/%m/%Y %H:%M:%S.%f')
+    if args.fbfFormat:
+        dfSPL['Session Start'] = pd.to_datetime(dfSPL['Session Start'], format='%Y/%m/%d %H:%M:%S.%f') # format='%d/%m/%Y %H:%M:%S.%f' format='%Y/%m/%d %H:%M:%S.%f' 
+        dfSPL['Session End'] = pd.to_datetime(dfSPL['Session End'], format='%Y/%m/%d %H:%M:%S.%f')
+    else:
+        dfSPL['Session Start'] = pd.to_datetime(dfSPL['Session Start'], format='%d/%m/%Y %H:%M:%S.%f') # format='%d/%m/%Y %H:%M:%S.%f' format='%Y/%m/%d %H:%M:%S.%f' 
+        dfSPL['Session End'] = pd.to_datetime(dfSPL['Session End'], format='%d/%m/%Y %H:%M:%S.%f')
            
     print('')
     print('Reading the XTF File')
@@ -307,17 +323,17 @@ def process(args, cmd):
         print(f"A total of {len(dfer)} Session SPL has/have no Linename information.")
         print("Please check the NoLineNameFound_log.csv for more information.")
         print("The column LineName in Full_SSS_log.csv will contain NoLineName for the corresponding *.xtf")
-        dfer.to_csv(xtfFolder + "NoLineNameFound_log.csv", index=True)  
+        dfer.to_csv(outputFolder + "\\" + "NoLineNameFound_log.csv", index=True)  
        
     # Droping duplicated *.xtf and creating a log.
     duplicate = dftmp[dftmp.duplicated(subset='SSS Start', keep=False)]
     duplicate.sort_values('SSS Start')
     if not duplicate.empty:
         print("")
-        print(f"A total of {len(duplicate)/2} *.xtf was/were duplicated.")
+        print(f"A total of {int(len(duplicate)/2)} *.xtf was/were duplicated.")
         print("Please check the Duplicate_SSS_Log.csv for more information.")
         print("The first *.xtf occurrence was renamed.")
-        duplicate.to_csv(xtfFolder + "Duplicate_SSS_Log.csv", index=True)
+        duplicate.to_csv(outputFolder + "\\" + "Duplicate_SSS_Log.csv", index=True)
         dftmp = dftmp.drop_duplicates(subset='SSS Start', keep='first')
         dfXTF = dfXTF.drop_duplicates(subset='SSS Start', keep='first')
    
@@ -331,52 +347,48 @@ def process(args, cmd):
     dfXTF['Session End'] = pd.to_datetime(dfXTF['Session End'], unit='s')
 
     # Saving the file
-    dfXTF.to_csv(xtfFolder + "Full_SSS_Log.csv", index=True)
-    dfXTF.to_csv(xtfFolder + "LineName_SSS_Log.csv", index=True, columns=['Session End','Vessel Name','SPL LineName','SSS FileName'])
+    dfXTF.to_csv(outputFolder + "\\" + "Full_SSS_Log.csv", index=True)
+    dfXTF.to_csv(outputFolder + "\\" + "LineName_SSS_Log.csv", index=True, columns=['Session End','Vessel Name','SPL LineName','SSS FileName'])
     print("")
-    print(f'Logs can be found in {xtfFolder}.')
+    print(f'Logs can be found in {outputFolder}.')
 
-##### Convert NEL/FBF/FBZ to CSV #####
-def NEL2CSV(Nelkey, NelFileName, Path):
-    ##### Convert NEL to CSV #####
-    FileName = os.path.splitext(os.path.basename(NelFileName))[0]    
-    csvfilepath = Path + FileName + "_" + Nelkey + '.csv'
-    cmd = 'for %i in ("' + NelFileName + '") do nel2asc -v "%i" ' + Nelkey + ' > ' + csvfilepath
-    subprocess.call(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    
-    #created the variables
-    dfS = pd.read_csv(csvfilepath, header=None, skipinitialspace=True)
-    LineStart = dfS.iloc[0][0]
-    LineName = dfS.iloc[0][3]
-    
-    #cleaning
-    os.remove(csvfilepath)
-    
-    return LineStart, LineName
-
+##### Convert FBF/FBZ to CSV #####
 def SPL2CSV(SPLFileName, Path, SPLFormat):
     ##### Convert FBZ to CSV #####
     FileName = os.path.splitext(os.path.basename(SPLFileName))[0]    
-    SPLFilePath = Path + "\\" + FileName + '.csv'
-    if SPLFormat == 'FBZ':
-        cmd = 'for %i in ("' + SPLFileName + '") do C:\ProgramData\Fugro\Starfix2018\Fugro.DescribedData2Ascii.exe %i > "' + SPLFilePath + '"'
+    SPLFilePath = Path + "\\" + FileName + '.txt'
+    if SPLFormat == 'FBZ':   
+        cmd = 'for %i in ("' + SPLFileName + '") do C:\ProgramData\Fugro\Starfix2018\Fugro.DescribedData2Ascii.exe -n3 %i > "' + SPLFilePath + '"'
     else:
-        cmd = 'for %i in ("' + SPLFileName + '") do fbf2asc -i %i > "' + SPLFilePath + '"'    
+        cmd = 'for %i in ("' + SPLFileName + '") do fbf2asc -n 3 -i %i Time LineName > "' + SPLFilePath + '"'    
     subprocess.call(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     #subprocess.call(cmd, shell=True) ### For debugging
     
     # created the variables
-    dfS = pd.read_csv(SPLFilePath, header=None, skipinitialspace=True, usecols=[0,8])
-    #print(dfS)
-    SessionStart = dfS.iloc[0][0]
-    SessionEnd = dfS.iloc[-1][0]
-    LineName = dfS.iloc[0][8]
+    #dfS = pd.read_csv(SPLFilePath, header=None, skipinitialspace=True, usecols=[0,8], nrows=1)
+    # from https://stackoverflow.com/questions/3346430/what-is-the-most-efficient-way-to-get-first-and-last-line-of-a-text-file/3346788
+    with open(SPLFilePath, 'rb') as fh:
+        first = next(fh).decode()
+        fh.seek(-1024, os.SEEK_END)
+        last = fh.readlines()[-1].decode()
+    
+    if SPLFormat == 'FBZ':
+        LineName = first.split(',')[1].replace('\n', '').replace(' \r', '').replace(' ', '', 1)      
+    else:
+        first = first.replace(' ', ',', 2).replace(',', ' ', 1)
+        last = last.replace(' ', ',', 2).replace(',', ' ', 1)
+        LineName = first.split(',')[1].replace('\n', '').replace(' \r', '')
+    #print(last)
+    SessionStart = first.split(',')[0]    
+    SessionEnd = last.split(',')[0]    
+    #print(SessionStart, LineName, SessionEnd)
+    #print(f'LineName: "{LineName}"')
     
     #cleaning  
     os.remove(SPLFilePath)
     
     #checking if linename is empty as is use in all other process
-    if pd.isnull(LineName):
+    if not LineName or LineName == "0.000": # Bug in NG to convert FBZ need to add == 0
         er = SPLFileName
         return SessionStart, SessionEnd, "NoLineNameFound", er       
     else:
@@ -387,7 +399,8 @@ def SPL2CSV(SPLFileName, Path, SPLFormat):
 def print_progress(index, total):
     print(f"progress: {index+1}/{total}")
     sys.stdout.flush()
-  
+
+
 if __name__ == "__main__":
     now = datetime.datetime.now() # time the process
     main()
