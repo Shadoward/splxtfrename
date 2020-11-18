@@ -25,7 +25,7 @@ extras_require = {
 
 setup(
     name='splxtfrename',
-    version='0.2.0',
+    version='0.3.0',
     description='Rename *.XTF using *.FBF/FBZ file',
     long_description=readme,
     author='Patrice Ponchant',
@@ -40,7 +40,7 @@ setup(
     package_dir={'': 'src'},
     keywords='FBF FBZ XTF SideScanSonar Rename',
     classifiers=[
-        'Development Status :: 1 - Beta',
+        'Development Status :: 3 - Beta',
         'Natural Language :: English',
         'Topic :: Scientific/Engineering'
         "Programming Language :: Python :: 3",

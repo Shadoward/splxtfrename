@@ -19,19 +19,14 @@ from pyXTF import *
 
 ##### For the basic function #####
 import datetime
-import sys
+import sys, os, glob
 from pathlib import Path
-import glob
-import os
 import subprocess
 
 import pandas as pd
 import math
 
 # progress bar
-import time
-from contextlib import redirect_stderr
-import io
 from tqdm import tqdm
 
 # GUI
@@ -70,7 +65,7 @@ if len(sys.argv) >= 2:
                 'menuTitle': 'About',
                 'name': 'SPL XTF Rename',
                 'description': 'Rename *.XTF using *.FBF/FBZ file',
-                'version': '0.2.0',
+                'version': '0.3.0',
                 'copyright': '2020',
                 'website': 'https://github.com/Shadoward/splxtfrename',
                 'developer': 'patrice.ponchant@fugro.com',
@@ -130,8 +125,8 @@ def main():
         dest='splFolder',       
         metavar='SPL Root Path', 
         help='This is the path where the *.fbf/*.fbz files to process are. (Root Session Folder)',
-        default='C:\\Users\\patrice.ponchant\\Downloads\\NEL',
-        #default='S:\\JOBS\\2020\\20030002_Shell_FBR_MF\\B2B_FromVessel\\Navigation\\Starfix_Logging\\RawData', 
+        #default='C:\\Users\\patrice.ponchant\\Downloads\\NEL',
+        default='S:\\JOBS\\2020\\20030002_Shell_FBR_MF\\B2B_FromVessel\\Navigation\\Starfix_Logging\\RawData', 
         widget='DirChooser',
         type=str,
         gooey_options=dict(full_width=True,))
@@ -186,59 +181,40 @@ def process(args, cmd):
     else:
         xtfListFile = glob.glob(xtfFolder + "\\*.xtf")
      
-    nowSPL = datetime.datetime.now() # record time of the subprocess   
+    nowSPL = datetime.datetime.now() # record time of the subprocess
+       
     if args.fbfFormat:
         splListFile = glob.glob(splFolder + "\\**\\" + splPosition + ".fbz", recursive=True)
-        print('')
-        print(f'A total of {splListFile} *.fbf/fbz and {xtfListFile} *.xtf files will be processed.')
-        print('')
-        print('Reading the FBZ Files')
-        if cmd: # to have a nice progress bar in the cmd  
-            pbar = tqdm(total=len(splListFile))
-        else:
-            print(f"Note: Output show file counting every {math.ceil(len(splListFile)/10)}")            
-        for index, n in enumerate(splListFile):              
-            SessionStart, SessionEnd, LineName, er = FBZ2CSV(n , splFolder)
-            dfSPL = dfSPL.append(pd.Series([SessionStart, SessionEnd, LineName, vessel], 
-                                    index=dfSPL.columns ), ignore_index=True)
-            if er:      
-                dfer = dfer.append(pd.Series([er], index=dfer.columns ), ignore_index=True)            
-            if cmd:
-                pbar.update(1)
-            else:
-                print_progress(index, len(splListFile)) # to have a nice progress bar in the GUI
-                if index % math.ceil(len(splListFile)/10) == 0: # decimate print
-                    print(f"Files Process: {index+1}/{len(splListFile)}")                    
-        if cmd:
-            pbar.close()
-        else:
-            print("Subprocess Duration: ", (datetime.datetime.now() - nowSPL))
+        SPLFormat = "FBZ"        
     else:
         splListFile = glob.glob(splFolder + "\\**\\" + splPosition + ".fbf", recursive=True)
-        print('')
-        print(f'A total of {len(splListFile)} *.fbf/fbz and {len(xtfListFile)} *.xtf files will be processed.')
-        print('')
-        print('Reading the FBF Files')
-        if cmd: # to have a nice progress bar in the cmd  
-            pbar = tqdm(total=len(splListFile))
-        else:
-            print(f"Note: Output show file counting every {math.ceil(len(splListFile)/10)}")             
-        for index, n in enumerate(splListFile):              
-            SessionStart, SessionEnd, LineName, er = FBF2CSV(n , splFolder)
-            dfSPL = dfSPL.append(pd.Series([SessionStart, SessionEnd, LineName, vessel], 
-                                    index=dfSPL.columns ), ignore_index=True)
-            if er:      
-                dfer = dfer.append(pd.Series([er], index=dfer.columns ), ignore_index=True)            
-            if cmd:
-                pbar.update(1)
-            else:
-                print_progress(index, len(splListFile)) # to have a nice progress bar in the GUI                
-                if index % math.ceil(len(splListFile)/10) == 0: # decimate print
-                    print(f"Files Process: {index+1}/{len(splListFile)}")                    
+        SPLFormat = "FBF"
+        
+    print('')
+    print(f'A total of {len(splListFile)} *.fbf/fbz and {len(xtfListFile)} *.xtf files will be processed.')
+    print('')
+    print('Reading the SPL Files')
+    
+    if cmd: # to have a nice progress bar in the cmd  
+        pbar = tqdm(total=len(splListFile))
+    else:
+        print(f"Note: Output show file counting every {math.ceil(len(splListFile)/10)}")            
+    for index, n in enumerate(splListFile): 
+        SessionStart, SessionEnd, LineName, er = SPL2CSV(n, splFolder, SPLFormat)        
+        dfSPL = dfSPL.append(pd.Series([SessionStart, SessionEnd, LineName, vessel], 
+                                index=dfSPL.columns ), ignore_index=True)
+        if er:      
+            dfer = dfer.append(pd.Series([er], index=dfer.columns ), ignore_index=True)            
         if cmd:
-            pbar.close()
+            pbar.update(1)
         else:
-            print("Subprocess Duration: ", (datetime.datetime.now() - nowSPL))
+            print_progress(index, len(splListFile)) # to have a nice progress bar in the GUI
+            if index % math.ceil(len(splListFile)/10) == 0: # decimate print
+                print(f"Files Process: {index+1}/{len(splListFile)}")                    
+    if cmd:
+        pbar.close()
+    else:
+        print("Subprocess Duration: ", (datetime.datetime.now() - nowSPL))
 
     # Format datetime
     dfSPL['Session Start'] = pd.to_datetime(dfSPL['Session Start'], format='%d/%m/%Y %H:%M:%S.%f') # format='%d/%m/%Y %H:%M:%S.%f' format='%Y/%m/%d %H:%M:%S.%f' 
@@ -378,54 +354,30 @@ def NEL2CSV(Nelkey, NelFileName, Path):
     
     return LineStart, LineName
 
-def FBF2CSV(FBFFileName, Path):
-    ##### Convert FBF to CSV #####
-    
-    FileName = os.path.splitext(os.path.basename(FBFFileName))[0]    
-    fbffilepath = Path + FileName + '.csv'
-    cmd = 'for %i in ("' + FBFFileName + '") do fbf2asc -i %i -o "' + fbffilepath + '"'
-    subprocess.call(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    #subprocess.call(cmd, shell=True) ### For debugging
-    
-    #created the variables
-    dfS = pd.read_csv(fbffilepath, header=None, skipinitialspace=True, na_values='NoLineNameFound')
-
-    SessionStart = dfS.iloc[0][0]
-    SessionEnd = dfS.iloc[-1][0]
-    LineName = dfS.iloc[0][8]
-    
-    #cleaning  
-    os.remove(fbffilepath)
-    
-    # checking if linename is empty as is use in all other process
-    if pd.isnull(LineName):
-        er = FBFFileName
-        return SessionStart, SessionEnd, "NoLineNameFound", er       
-    else:
-        er = ""
-        return SessionStart, SessionEnd, LineName, er
-
-def FBZ2CSV(FBZFileName, Path):
+def SPL2CSV(SPLFileName, Path, SPLFormat):
     ##### Convert FBZ to CSV #####
-    FileName = os.path.splitext(os.path.basename(FBZFileName))[0]    
-    fbzfilepath = Path + FileName + '.csv'
-    cmd = 'for %i in ("' + FBZFileName + '") do C:\ProgramData\Fugro\Starfix2018\Fugro.DescribedData2Ascii.exe %i > "' + fbzfilepath + '"'
+    FileName = os.path.splitext(os.path.basename(SPLFileName))[0]    
+    SPLFilePath = Path + "\\" + FileName + '.csv'
+    if SPLFormat == 'FBZ':
+        cmd = 'for %i in ("' + SPLFileName + '") do C:\ProgramData\Fugro\Starfix2018\Fugro.DescribedData2Ascii.exe %i > "' + SPLFilePath + '"'
+    else:
+        cmd = 'for %i in ("' + SPLFileName + '") do fbf2asc -i %i > "' + SPLFilePath + '"'    
     subprocess.call(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     #subprocess.call(cmd, shell=True) ### For debugging
     
-    #created the variables
-    dfS = pd.read_csv(fbzfilepath, header=None, skipinitialspace=True, na_values='NoLineNameFound')
-
+    # created the variables
+    dfS = pd.read_csv(SPLFilePath, header=None, skipinitialspace=True, usecols=[0,8])
+    #print(dfS)
     SessionStart = dfS.iloc[0][0]
     SessionEnd = dfS.iloc[-1][0]
     LineName = dfS.iloc[0][8]
     
     #cleaning  
-    os.remove(fbzfilepath)
+    os.remove(SPLFilePath)
     
     #checking if linename is empty as is use in all other process
     if pd.isnull(LineName):
-        er = FBZFileName
+        er = SPLFileName
         return SessionStart, SessionEnd, "NoLineNameFound", er       
     else:
         er = ""
